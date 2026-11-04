@@ -1,0 +1,151 @@
+import { describe, expect, it } from "vitest";
+import {
+  closeOrder,
+  projectedVaultApyWad,
+  fixSourceCopy,
+  parseFixSource,
+  lotsFor,
+  marketLimitTick,
+  snapshotsFromLogs,
+  swapAprToTick,
+  swapPositionFromViews,
+  swapTickToAprWad,
+  vaultRoutePending,
+  vaultStatus,
+  vaultWithdrawFeeToken,
+  vaultWithdrawPath,
+} from "./earnfix";
+
+const TICK = 10n ** 14n;
+const LOT = 1_000n * 10n ** 18n;
+const V = "0x00000000000000000000000000000000000000aa" as const;
+const U = "0x00000000000000000000000000000000000000bb" as const;
+
+describe("vault withdrawals (MeridianVault.previewRedeem, _ensureIdle)", () => {
+  it("5 bps fee rounds up: 100 AUSD ⇒ 0.05; 1 unit ⇒ 1 unit", () => {
+    expect(vaultWithdrawFeeToken(100_000_000n)).toBe(50_000n);
+    expect(vaultWithdrawFeeToken(1n)).toBe(1n);
+    expect(vaultWithdrawFeeToken(0n)).toBe(0n);
+    expect(vaultWithdrawFeeToken(19_999n)).toBe(10n); // 9.9995 ⇒ 10
+  });
+  it("idle first, unwind beyond it", () => {
+    expect(vaultWithdrawPath(113_333_333n, 100_000_000n)).toBe("idle");
+    expect(vaultWithdrawPath(113_333_333n, 113_333_334n)).toBe("unwind");
+  });
+  it("status: hedged / rebalancing / waiting for funding (PRD US6)", () => {
+    expect(vaultStatus(true, 0)).toBe("hedged");
+    expect(vaultStatus(true, 7)).toBe("rebalancing");
+    expect(vaultStatus(false, 5)).toBe("rebalancing");
+    expect(vaultStatus(false, 0)).toBe("waiting");
+  });
+  it("route pending: an unhedged vault waits for the route; a hedged one keeps its state", () => {
+    expect(vaultStatus(false, 0, true)).toBe("waiting-route");
+    expect(vaultStatus(false, 5, true)).toBe("waiting-route");
+    expect(vaultStatus(true, 0, true)).toBe("hedged");
+  });
+});
+
+describe("swap order entry (p = 1 + APR, tick 1 bp)", () => {
+  it("12.00% ↔ tick 11,200; off-grid: long floors, short ceils", () => {
+    expect(swapAprToTick(120_000_000_000_000_000n, TICK, true)).toBe(11_200);
+    expect(swapAprToTick(120_050_000_000_000_000n, TICK, true)).toBe(11_200);
+    expect(swapAprToTick(120_050_000_000_000_000n, TICK, false)).toBe(11_201);
+    expect(swapTickToAprWad(11_098, TICK)).toBe(109_800_000_000_000_000n);
+    expect(swapAprToTick(-50_000_000_000_000_000n, TICK, true)).toBe(9_500);
+    expect(() => swapAprToTick(-WAD_(), TICK, true)).toThrow(/−100%/);
+  });
+  it("market limit tick = opposite best ± slippage; none without liquidity", () => {
+    expect(marketLimitTick(true, 11_098, 20)).toBe(11_118);
+    expect(marketLimitTick(false, 11_092, 20)).toBe(11_072);
+    expect(marketLimitTick(false, 5, 20)).toBe(1);
+    expect(marketLimitTick(true, undefined, 20)).toBeNull();
+  });
+  it("lots and close", () => {
+    expect(lotsFor(2_500n * 10n ** 18n, LOT)).toBe(2n);
+    expect(lotsFor(999n * 10n ** 18n, LOT)).toBe(0n);
+    expect(closeOrder(2_000n * 10n ** 18n, LOT)).toEqual({ isBid: false, lots: 2n });
+    expect(closeOrder(-3_000n * 10n ** 18n, LOT)).toEqual({ isBid: true, lots: 3n });
+    expect(closeOrder(0n, LOT)).toBeNull();
+  });
+});
+
+describe("parsers", () => {
+  it("NavSnapshot logs → newest-first VaultSnapshot rows", () => {
+    const rows = snapshotsFromLogs(
+      V,
+      [
+        { blockNumber: 10n, logIndex: 0, args: { nav: 1n, totalShares: 2n, sharePriceWad: 3n, fundingAccruedWad: 4n } },
+        { blockNumber: 12n, logIndex: 1, args: { nav: 5n, totalShares: 6n, sharePriceWad: 7n, fundingAccruedWad: -8n } },
+      ],
+      (b) => b * 100n,
+    );
+    expect(rows.map((r) => [r.block, r.sharePriceWad, r.timestamp])).toEqual([
+      [12n, 7n, 1_200n],
+      [10n, 3n, 1_000n],
+    ]);
+    expect(rows[0]!.id).toBe(`${V}-12-1`);
+  });
+  it("swap views → position row; a closed position at another APR is a locked spread", () => {
+    const open = swapPositionFromViews(V, U, { size: 2n * LOT, fixedAprNotional: 219_600_000_000_000_000_000n }, { collateral: 5n, avgFixedApr: 109_800_000_000_000_000n, accruedNet: -7_743_156_685n }, 146n);
+    expect(open).toMatchObject({ size: 2n * LOT, avgFixedAprWad: 109_800_000_000_000_000n, netAccrued: -7_743_156_685n, lockedSpread: false });
+    const locked = swapPositionFromViews(V, U, { size: 0n, fixedAprNotional: -30_000n * 10n ** 18n }, { collateral: 5n, avgFixedApr: 0n, accruedNet: 1n }, 1n);
+    expect(locked.lockedSpread).toBe(true);
+    expect(locked.avgFixedAprWad).toBeUndefined();
+  });
+});
+
+function WAD_(): bigint {
+  return 10n ** 18n;
+}
+
+describe("vaultRoutePending: idle launch read from the chain (PHASES 17)", () => {
+  it("skewCapacity 0 means waiting for route even without the env flag", () => {
+    expect(vaultRoutePending(undefined, 0n)).toBe(true);
+    expect(vaultRoutePending("", 0n)).toBe(true);
+  });
+  it("the env flag still forces it", () => {
+    expect(vaultRoutePending("1", 800000000000000000n)).toBe(true);
+  });
+  it("a hedging-capable vault with no flag is not pending; unknown params (indexer/mock) fall back to the flag", () => {
+    expect(vaultRoutePending(undefined, 800000000000000000n)).toBe(false);
+    expect(vaultRoutePending(undefined, undefined)).toBe(false);
+  });
+});
+
+describe("Fix funding source (CR-017)", () => {
+  it("?source=perpl selects Perpl; anything else is Meridian", () => {
+    expect(parseFixSource("?source=perpl")).toBe("perpl");
+    expect(parseFixSource("?source=PERPL")).toBe("meridian");
+    expect(parseFixSource("")).toBe("meridian");
+    expect(parseFixSource("?x=1&source=perpl")).toBe("perpl");
+  });
+  it("Perpl copy states the cadence, the network and the trust in Perpl; Meridian copy has neither", () => {
+    const p = fixSourceCopy("perpl");
+    expect(p.settles).toBe("Settles on Perpl's onchain funding, once per Perpl funding interval (~43 min). Testnet.");
+    expect(p.risk).toMatch(/overwrite a funding sum/);
+    expect(p.risk).toMatch(/If nobody pokes, accrual pauses/);
+    expect(p.market).toContain("Perpl");
+    const m = fixSourceCopy("meridian");
+    expect(m.settles).toBeUndefined();
+    expect(m.risk).toBeUndefined();
+    expect(m.market).not.toContain("Perpl");
+  });
+});
+
+describe("projectedVaultApyWad: funding APR x the vault's hedged share of NAV", () => {
+  const W = 10n ** 18n;
+  const L = 15n * 10n ** 17n; // leverage 1.5
+  const IDLE = 5n * 10n ** 16n; // 5% idle buffer
+  it("hedged share = (1 - idle) x L / (L + 1) = 0.57 at the testnet params", () => {
+    expect(projectedVaultApyWad(W, L, IDLE)).toBe(57n * 10n ** 16n);
+    expect(projectedVaultApyWad(122n * 10n ** 15n, L, IDLE)).toBe(69_540_000_000_000_000n); // 12.2% -> 6.954%
+  });
+  it("rounds toward zero (never overstates) and keeps the sign of negative funding", () => {
+    expect(projectedVaultApyWad(1n, L, IDLE)).toBe(0n);
+    expect(projectedVaultApyWad(-W, L, IDLE)).toBe(-57n * 10n ** 16n);
+  });
+  it("zero leverage or a full idle buffer projects nothing", () => {
+    expect(projectedVaultApyWad(W, 0n, IDLE)).toBe(0n);
+    expect(projectedVaultApyWad(W, L, W)).toBe(0n);
+  });
+});
