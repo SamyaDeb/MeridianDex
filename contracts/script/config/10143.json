@@ -1,0 +1,154 @@
+{
+  "chainId": 10143,
+  "_sources": "Chain id + CRE forwarders: ARCHITECTURE R1, R14. WMON, Pyth, 'no Chainlink', 'no AUSD': PHASES decision 10 (verified 29 Sep). Everything else null = VERIFY before use.",
+  "owner": null,
+  "_owner": "Testnet owner = the deployer (ownerIsDeployer); DeployMeridian writes the resolved address into deployments/10143.json. Mainnet (143) will be the 2-of-3 Safe in Phase 5; the script refuses a deployer owner on 143.",
+  "ownerIsDeployer": true,
+  "tokens": {
+    "AUSD": null,
+    "_AUSD": "Unused since 4 Nov 2026: the collateral is USDC (tokens.USDC). Kept for history: no AUSD on testnet (decision 10)",
+    "WMON": "0xFb8bf4c1CC7a94c73D209a149eA2AbEa852BC541",
+    "_WMON": "PHASES decision 10 (verified 29 Sep)",
+    "USDC": null,
+    "_USDC": "Collateral (4 Nov 2026). No verified USDC on testnet: DeployMeridian deploys MockERC20 'tUSDC' (6 dp, open mint for the faucet)",
+    "USDC_decimals": 6
+  },
+  "pyth": {
+    "contract": "0x2880aB155794e7179c9eE2e38200202908C17B43",
+    "_contract": "PHASES decision 10: exists on testnet but the MON/USD feed is ~75 min stale (no sponsored push) => the keeper must push Hermes updates (Pyth API key = CP1 blocker)",
+    "monUsdFeedId": "0x31491744e2dbf6df7fcf4ac0820d18a609b49076d45066d3568424e62f686cd1",
+    "_monUsdFeedId": "Pyth feed ids are chain-independent; VERIFY the feed is pushed on testnet",
+    "expo": -8
+  },
+  "chainlink": {
+    "monUsd": null,
+    "_monUsd": "No Chainlink feeds on testnet (decision 10): adapter runs with secondary = address(0)",
+    "ausdUsd": null,
+    "ethUsd": null,
+    "decimals": 8
+  },
+  "kuru": {
+    "router": null,
+    "marginAccount": null,
+    "flowEntrypoint": null,
+    "flowRouter": null,
+    "_kuru": "VERIFY: Kuru testnet deployment (docs.kuru.io); vault hedger uses MockKuruHedger until then"
+  },
+  "cre": {
+    "keystoneForwarder": "0xF8344CFd5c43616a4366C34E3EEE75af79a74482",
+    "keystoneForwarderSim": "0xB9F79d863261869B234c481D1f9A7af84AeAd192"
+  },
+  "params": {
+    "_note": "WAD values are decimal strings. Sources: MATH_SPEC §1.3 (funding), §3.3 (risk), §5.3 (vault), §6 (swaps); TEAM_PLAN §7 (launch caps).",
+    "perp": {
+      "symbol": "MON-PERP",
+      "tickSizeWad": "1000000000000",
+      "lotSizeWad": "100000000000000000000",
+      "risk": {
+        "imr": "200000000000000000",
+        "mmr": "100000000000000000",
+        "takerFee": "500000000000000",
+        "makerFee": "-100000000000000",
+        "liqPenalty": "10000000000000000",
+        "keeperShare": "500000000000000000",
+        "maxOpenInterest": "250000000000000000000000",
+        "maxPositionSize": "25000000000000000000000"
+      },
+      "funding": {
+        "alpha": "2000000000000000",
+        "interestRate": "3472222222",
+        "rateCap": "555555555556",
+        "maxRateChangePerBlock": "555555556",
+        "blockTimeMs": 300,
+        "premiumBandWad": "50000000000000000"
+      }
+    },
+    "swap": {
+      "_maturity": "unix seconds, set at deploy: 30 days after listing (MATH_SPEC §6.1)",
+      "maturity": null,
+      "tickSizeWad": "100000000000000",
+      "lotSizeWad": "1000000000000000000000",
+      "params": {
+        "aprMoveBuffer": "50000000000000000",
+        "liqHorizonSec": 86400,
+        "imMultiplier": "1500000000000000000",
+        "takerFeeApr": "2000000000000000",
+        "makerFeeApr": "-500000000000000",
+        "liqPenalty": "200000000000000000",
+        "keeperShare": "500000000000000000",
+        "maxOpenInterest": "2000000000000000000000000",
+        "_maxPositionSize": "A's choice (not in specs): 10% of the per-side OI cap, same ratio as the perp",
+        "maxPositionSize": "200000000000000000000000"
+      }
+    },
+    "vault": {
+      "leverage": "1500000000000000000",
+      "driftBand": "20000000000000000",
+      "targetMarginRatio": "600000000000000000",
+      "minMarginRatio": "250000000000000000",
+      "exitHorizonSec": 259200,
+      "roundTripFee": "1500000000000000",
+      "maxSlippage": "5000000000000000",
+      "idleBuffer": "50000000000000000",
+      "depositCap": "10000000000",
+      "skewCapacity": "800000000000000000",
+      "entryHorizonSec": 604800,
+      "maxSliceAssets": "2500000000"
+    },
+    "oracle": {
+      "_maxStalenessSec": "10 s assumes keeper Hermes pushes (R12); 60 s without a Pyth API key (R24). WS-03 owns",
+      "maxStalenessSec": 10,
+      "chainlinkGuardStalenessSec": 3600,
+      "_maxDeviationWad": "2% (A's choice, WS-03): Pyth vs Chainlink guard tolerance on mainnet; Chainlink MON/USD moves minutes apart (R11), so a tighter band would trip in fast markets. Unused on testnet (no Chainlink; TestnetKeeperOracle reports it only). VERIFY vs Chainlink's deviation threshold at data.chain.link before mainnet",
+      "maxDeviationWad": "20000000000000000",
+      "kind": "keeper-fed",
+      "_kind": "'keeper-fed' (TestnetKeeperOracle fed by the keeper from mainnet Pyth MON/USD, fallback Hyperliquid) until a Pyth Hermes API key exists (R24; testnet Pyth MON/USD verified ~5.4 h stale on 30 Sep). With a key: 'pyth' (PythChainlinkOracleAdapter, secondary = address(0) since there is no Chainlink on testnet) + maxStalenessSec 10 and keeper Hermes pushes; the CH's oracle is immutable, so switching means redeploying the market.",
+      "keeperFedMaxStalenessSec": 60,
+      "_keeperFedMaxStalenessSec": "60 s = R24's no-key value: source cadence (mainnet sponsored Pyth 10–30 s) + keeper heartbeat 10 s + inclusion; beyond it the CH freezes funding and blocks increases (MATH_SPEC §1.6)"
+    }
+  },
+  "_rpc": "Public testnet RPC https://testnet-rpc.monad.xyz (QuickNode, 50 rps; 25 rps eth_call/estimateGas) per docs.monad.xyz/developer-essentials/testnet (ARCHITECTURE R29). Scripts still read MONAD_TESTNET_RPC_URL from .env.",
+  "demoMarket": {
+    "enabled": true,
+    "symbol": "MON-PERP-DEMO",
+    "_note": "TEST MARKET (own OB + CH + keeper-fed TestnetKeeperOracle, shared IF), used only for the crash/liquidation demo: real Pyth can't be moved on demand, and the main market's price/params are never forced (Phase 3 step 3)."
+  },
+  "markets": {
+    "_note": "Additional perp markets added to an existing deployment by script/AddMarket.s.sol (MARKET_KEY = the key below). Each is a standalone OrderBook + ClearingHouse + keeper-fed TestnetKeeperOracle registered in the existing MarketFactory and authorized on the existing InsuranceFund (PHASES decision 44).",
+    "eth": {
+      "symbol": "ETH-PERP",
+      "feedSymbol": "ETH/USD",
+      "pythFeedId": "0xff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace",
+      "_pythFeedId": "Pyth Crypto.ETH/USD, from Hermes GET /v2/price_feeds?query=ETH&asset_type=crypto (keepers/ts-fallback DEFAULT_HERMES_URL), 8 Oct 2026. The keeper pushes Hermes prices into the keeper-fed oracle; testnet Pyth is not sponsored-pushed (PHASES decision 10)",
+      "baseAsset": null,
+      "_baseAsset": "No verified WETH on Monad testnet: informational field (IMarketFactory.Market.baseAsset), left address(0). Chainlink ETH/USD is mainnet only (ARCHITECTURE R11)",
+      "_params": "PHASES decision 44. Reference ETH = 2,574.63 USD (testnet Pyth getPriceUnsafe, 8 Oct 2026), MON = 0.0256. tick 0.10 USD = 0.39 bp of ETH, the same relative tick as MON-PERP (1e-6 / 0.0256 = 0.39 bp), so the 5.9 bp A-S spread spans ~15 ticks (MATH_SPEC §4). lot 0.001 ETH = 2.57 USD = the MON-PERP lot in dollars (100 MON = 2.56 USD). Caps = MON-PERP's in dollars (25k MON = 640 USD -> 0.25 ETH; 250k MON = 6.4k USD -> 2.5 ETH). Risk and funding identical to MON-PERP: funding params are per-second or dimensionless (MATH_SPEC §1.3); mmr 10% >> z*sigma*sqrt(tau) for ETH vol (MATH_SPEC §3.4), set by launch liquidity like MON",
+      "tickSizeWad": "100000000000000000",
+      "lotSizeWad": "1000000000000000",
+      "risk": {
+        "imr": "200000000000000000",
+        "mmr": "100000000000000000",
+        "takerFee": "500000000000000",
+        "makerFee": "-100000000000000",
+        "liqPenalty": "10000000000000000",
+        "keeperShare": "500000000000000000",
+        "maxOpenInterest": "2500000000000000000",
+        "maxPositionSize": "250000000000000000"
+      },
+      "funding": {
+        "alpha": "2000000000000000",
+        "interestRate": "3472222222",
+        "rateCap": "555555555556",
+        "maxRateChangePerBlock": "555555556",
+        "blockTimeMs": 300,
+        "premiumBandWad": "50000000000000000"
+      },
+      "oracle": {
+        "kind": "keeper-fed",
+        "maxStalenessSec": 60,
+        "_maxStalenessSec": "= params.oracle.keeperFedMaxStalenessSec (R24 no-key value)",
+        "maxDeviationWad": "20000000000000000"
+      }
+    }
+  }
+}
