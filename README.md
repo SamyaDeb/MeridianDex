@@ -1,4 +1,5 @@
 # Meridian
+<img width="1452" height="831" alt="Screenshot 2026-11-04 at 5 27 22 PM" src="https://github.com/user-attachments/assets/36b6787d-70f6-409c-9000-3f63e082d9df" />
 
 **The funding-rate layer for Monad.** Meridian is a perpetual exchange where funding accrues every block. Its funding rate is also a public onchain oracle that other contracts can read, earn from, or lock in at a fixed rate.
 
