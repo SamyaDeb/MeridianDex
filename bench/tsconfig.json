@@ -1,0 +1,10 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": [
+      "node"
+    ]
+  },
+  "include": ["src", "test", "gas_onchain.ts", "load.ts", "crash_sanity.ts", "b4_parallel_markets.ts", "perpl_hedge.ts"]
+}

@@ -1,0 +1,28 @@
+{
+  "name": "@meridian/bench",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "Meridian benchmarks B1/B2 (gas from receipts) and B4 (multi-market load) — WS-08",
+  "type": "module",
+  "scripts": {
+    "gas": "tsx gas_onchain.ts",
+    "load": "tsx load.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "report": "tsx report.ts",
+    "crash-sanity": "tsx crash_sanity.ts",
+    "b4": "tsx b4_parallel_markets.ts",
+    "perpl-hedge": "tsx perpl_hedge.ts"
+  },
+  "dependencies": {
+    "@meridian/abis": "workspace:*",
+    "viem": "^2.57.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.2"
+  }
+}

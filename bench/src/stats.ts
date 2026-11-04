@@ -1,0 +1,115 @@
+// Pure helpers for the onchain benchmarks (BENCHMARKS_PLAN B1, B2, B4). No RPC; unit-tested.
+
+/** Nearest-rank percentile (p in [0, 100]) of a non-empty list. */
+export function percentile(xs: readonly number[], p: number): number {
+  if (xs.length === 0) throw new Error("empty");
+  const s = [...xs].sort((a, b) => a - b);
+  const rank = Math.ceil((Math.min(Math.max(p, 0), 100) / 100) * s.length);
+  return s[Math.max(rank, 1) - 1]!;
+}
+
+/** Mean block time (ms) over a block range from (number, timestamp s) pairs: Δtimestamp / Δnumber. */
+export function meanBlockTimeMs(first: { number: bigint; timestamp: bigint }, last: { number: bigint; timestamp: bigint }): number {
+  const dn = Number(last.number - first.number);
+  if (dn <= 0) return 0;
+  return (Number(last.timestamp - first.timestamp) * 1000) / dn;
+}
+
+export interface GasRow {
+  op: string;
+  gasUsed: bigint;
+  gasLimit: bigint;
+  block: bigint;
+  txHash: string;
+  /** eth_estimateGas ("latest") the limit was built from: the only view of execution gas on Monad (P7, Found #19). */
+  estimate?: bigint;
+  /** TOUCH_ALLOWANCE_GAS added to ⌈estimate × 1.2⌉ for this tx. */
+  touchAllowance?: bigint;
+}
+
+export const GAS_CSV_HEADER = "op,gasUsed,gasLimit,block,txHash,commit,date,chainId,blockTimeMs,gasEstimate,touchAllowance";
+
+export function gasCsvRow(r: GasRow, meta: { commit: string; date: string; chainId: number; blockTimeMs: number }): string {
+  return [r.op, r.gasUsed, r.gasLimit, r.block, r.txHash, meta.commit, meta.date, meta.chainId, meta.blockTimeMs.toFixed(1), r.estimate ?? "", r.touchAllowance ?? ""].join(",");
+}
+
+/** Foundry reference (contracts/bench-out/real_engine_gas.csv: op,gas,target) → map. */
+export function parseFoundryCsv(csv: string): Map<string, { gas: number; target: number | null }> {
+  const out = new Map<string, { gas: number; target: number | null }>();
+  for (const line of csv.trim().split("\n").slice(1)) {
+    const [op, gas, target] = line.split(",");
+    if (op === undefined || gas === undefined) continue;
+    out.set(op, { gas: Number(gas), target: target === undefined || target === "" ? null : Number(target) });
+  }
+  return out;
+}
+
+/** Monad bills the gas limit (ARCHITECTURE R6): limit = ceil(estimate × 1.2). */
+/**
+ * Gas limit = ⌈estimate × 1.2⌉ + touchAllowance. Estimates against "latest" miss the block's first funding touch
+ * (≈ 70k, paid by whichever tx lands first in a block), so a tx sent on a live chain needs the allowance or it can run
+ * out of gas (10143, 5 Oct: replaceOrder used its whole 164,388 limit). Same rule as mm-bot TOUCH_ALLOWANCE_GAS.
+ */
+export function gasLimitFor(estimate: bigint, touchAllowance = 0n): bigint {
+  return (estimate * 12n + 9n) / 10n + touchAllowance;
+}
+
+export interface LoadResult {
+  markets: number;
+  sent: number;
+  included: number;
+  blocks: number;
+  txPerBlock: number;
+  latencyMsP50: number;
+  latencyMsP95: number;
+}
+
+/** B4 summary for one K. */
+export function summarizeLoad(markets: number, latenciesMs: readonly number[], sent: number, firstBlock: bigint, lastBlock: bigint): LoadResult {
+  const blocks = Number(lastBlock - firstBlock) + 1;
+  return {
+    markets,
+    sent,
+    included: latenciesMs.length,
+    blocks,
+    txPerBlock: blocks > 0 ? latenciesMs.length / blocks : 0,
+    latencyMsP50: latenciesMs.length ? percentile(latenciesMs, 50) : 0,
+    latencyMsP95: latenciesMs.length ? percentile(latenciesMs, 95) : 0,
+  };
+}
+
+/** B4 tx mix (BENCHMARKS_PLAN): 70% place/cancel, 30% market, deterministic from a seed. */
+export function loadMix(n: number, seed: number): Array<"place" | "cancel" | "market"> {
+  const out: Array<"place" | "cancel" | "market"> = [];
+  let x = seed >>> 0 || 1;
+  let open = 0;
+  for (let i = 0; i < n; ++i) {
+    x ^= x << 13;
+    x ^= x >>> 17;
+    x ^= x << 5;
+    x >>>= 0;
+    const r = x % 100;
+    if (r < 30) out.push("market");
+    else if (r < 65 || open === 0) {
+      out.push("place");
+      ++open;
+    } else {
+      out.push("cancel");
+      --open;
+    }
+  }
+  return out;
+}
+
+/** A book side exists when its best tick is neither 0 (no bids) nor near the uint32 sentinel (no asks). */
+export function hasSide(tick: number): boolean {
+  return tick > 0 && tick < 0xffff_ff00;
+}
+
+/**
+ * Label for output files: "anvil-<chainId>" when the node is anvil (a local chain started with --chain-id 10143 must
+ * never produce a file that reads like testnet evidence), else the chain id.
+ */
+export function networkLabel(chainId: number, clientVersion: string): string {
+  return /anvil/i.test(clientVersion) ? `anvil-${chainId}` : String(chainId);
+}
