@@ -1,0 +1,62 @@
+{
+  "chainId": 10143,
+  "contracts": {
+    "ClearingHouse": "0x59C71095dc92441b792be52C5a3578C6C61913CE",
+    "FundingSwapMarket": "0xfcc42f31b6Fe04b0FE082112a726f45Cc1035E5A",
+    "InsuranceFund": "0x9f2D50c9dcefd015F9b40FbC3ABe31d2Cfe3941b",
+    "KuruHedger": "0x6CCE3e1Ac202576257bB5F21C4fdd6593BAC9EbD",
+    "MarketFactory": "0x9277E09F143e654Eb9A12378f715813da2c40501",
+    "MeridianVault": "0xAC2E530E5db8056bFf7D5C47E453dB88087d4f80",
+    "OracleAdapter": "0x23a16055506ecFf0c1533fE85768eA9068e4aA68",
+    "OrderBook": "0x2d8eb2cD64ecBF9bFb5CE0F4Eb6C9f2a9de6750b",
+    "SwapOrderBook": "0x5477689ef84F1880d2748A732EE029C43698D7EE",
+    "USDC": "0xCE10D23dbE5054fF7311c4FB3703C9CF740e9251",
+    "WMON": "0xFb8bf4c1CC7a94c73D209a149eA2AbEa852BC541"
+  },
+  "demoMarket": {
+    "ClearingHouse": "0x68a95469e72ed55Bf47c882811A5343b9A69eAEb",
+    "OracleAdapter": "0xd5DbD1C624CBc08DF9c8B69B65cddf8fe0eBD1c4",
+    "OrderBook": "0xbc01B2F0130d26D74103235afb2bf3Ee3cf4A4C1",
+    "_label": "TEST MARKET: keeper-fed oracle, used only for the crash/liquidation demo",
+    "oracleKind": "keeper-fed",
+    "symbol": "MON-PERP-DEMO",
+    "testMarket": true
+  },
+  "deployed": true,
+  "mockContracts": [
+    "USDC",
+    "KuruHedger"
+  ],
+  "mocks": false,
+  "oracleKind": "keeper-fed",
+  "owner": "0x4844Ce488a1B2428f9E375c5659C5D7C4903313c",
+  "startBlock": 76880663,
+  "symbol": "MON-PERP",
+  "_operators": "Redeploy 4 Nov 2026 (USDC collateral, new owner = deployer). mmAccounts = perp MM, house taker flow (mm-bot pnpm flow), Perpl-funding swap MM; keeperAccounts = main keeper (also the oracle feeder). Excluded from ProtocolStats.externalUsers (indexer gen-config). The pre-4-Nov AUSD deployment (ETH-PERP market, Perpl swap market) is abandoned: its keys are lost.",
+  "mmAccounts": [
+    "0xB70B74b00A5De77142262e5A215B61EDC1bb214c",
+    "0x28FB8A283DCbe1F05F96c93696BF233b4000238a",
+    "0x86dE5d8F233dA245fd93818C465B409E7Ae475D5"
+  ],
+  "keeperAccounts": [
+    "0xB99DB60ED7c130B098B5B329d1c9BDEd5db81B93"
+  ],
+  "vaultStartBlock": 76880663,
+  "swapMarkets": [
+    {
+      "FundingSwapMarket": "0x7fd19921030aF2DDEb6478e0611BCC434Af12498",
+      "PerplFundingSource": "0xF40B96d21F137697C1Db9B6b4E4bDe84856cE2df",
+      "SwapOrderBook": "0xcD5DADfd92C500F0c6BFb2Cc40400086550fB2A2",
+      "_label": "TESTNET SWAP MARKET: settles on Perpl's MON-perp funding (PerplFundingSource)",
+      "deployed": true,
+      "fundingSource": "perpl",
+      "lotSizeWad": "1000000000000000000000",
+      "maturity": 1796381644,
+      "perplExchange": "0x1964C32f0bE608E7D29302AFF5E61268E72080cc",
+      "perplPerpId": 64,
+      "startBlock": 76896989,
+      "symbol": "MON-FUNDING-PERPL",
+      "tickSizeWad": "100000000000000"
+    }
+  ]
+}
