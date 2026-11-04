@@ -1,0 +1,11 @@
+packages:
+  - abis
+  - keepers/*
+  - mm-bot
+  - indexer
+  - app
+  - bench
+  - mfi
+  - packages/*
+  - mobile
+  - risk

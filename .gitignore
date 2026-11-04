@@ -1,0 +1,35 @@
+# Foundry
+contracts/out/
+contracts/cache/
+contracts/broadcast/*/31337/
+contracts/bench-out/
+# Node
+node_modules/
+.next/
+dist/
+# Env / secrets
+.env
+.env.*
+!.env.example
+# Envio
+indexer/generated/
+# OS
+.DS_Store
+mm-bot/KILL
+app/test-results/
+app/playwright-report/
+contracts/broadcast/*/*/dry-run/
+# local bot run logs
+runs/
+contracts/broadcast/*/*/run-[0-9]*.json
+# local rehearsal deployments (DeployMeridian DEPLOYMENTS_OUT=anvil-<chain>.json)
+deployments/anvil-*.json
+contracts/broadcast/SmokeFull.s.sol/
+# DeployMeridian fork tests: patched configs + their deployment records
+contracts/script/config/tmp/
+deployments/fork-test-*.json
+
+
+# MFI service history (decision D7), runtime data
+mfi/data/
+.bots/
