@@ -1,0 +1,23 @@
+import type { MetadataRoute } from "next";
+import { COLLATERAL } from "@/config/collateral";
+
+export default function manifest(): MetadataRoute.Manifest {
+  return {
+    name: "Meridian: per-block funding on Monad",
+    short_name: "Meridian",
+    description: `Per-block funding perp, funding-rate oracle, basis vault and fixed-rate funding swaps. All in ${COLLATERAL}.`,
+    id: "/",
+    start_url: "/trade",
+    scope: "/",
+    display: "standalone",
+    orientation: "portrait",
+    background_color: "#050507",
+    theme_color: "#050507",
+    categories: ["finance"],
+    icons: [
+      { src: "/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+      { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+      { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
+    ],
+  };
+}
