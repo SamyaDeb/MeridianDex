@@ -1,0 +1,27 @@
+{
+  "name": "@meridian/mm-bot",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "Meridian market maker: Avellaneda–Stoikov in bps (MATH_SPEC §4), 3 levels per side via replaceOrder (WS-03)",
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "flow": "tsx src/flow.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@meridian/abis": "workspace:*",
+    "@meridian/bot-rpc": "workspace:*",
+    "@meridian/mfi": "workspace:*",
+    "@noble/ed25519": "^3.2.0",
+    "viem": "^2.57.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.2"
+  }
+}

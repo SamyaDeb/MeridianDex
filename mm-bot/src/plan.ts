@@ -1,0 +1,109 @@
+// Pure requote planner: the minimal replace / place / cancel set that turns our resting orders into the target
+// ladder. replaceOrder is the hot path (< 100k gas, loses time priority), so moved orders are replaced, not
+// cancelled and re-placed. Unit-tested in test/plan.test.ts.
+import type { Level } from "./as.js";
+
+export interface Resting {
+  id: bigint;
+  isBid: boolean;
+  tick: number;
+  lots: bigint;
+}
+
+export interface Plan {
+  replace: Array<{ id: bigint; isBid: boolean; tick: number; lots: bigint }>;
+  place: Array<{ isBid: boolean; tick: number; lots: bigint }>;
+  cancel: bigint[];
+}
+
+function side(resting: readonly Resting[], isBid: boolean, target: readonly Level[]) {
+  const mine = resting.filter((r) => r.isBid === isBid);
+  const keep = new Set<bigint>();
+  const todo: Level[] = [];
+  for (const t of target) {
+    const exact = mine.find((r) => !keep.has(r.id) && r.tick === t.tick && r.lots === t.lots);
+    if (exact) keep.add(exact.id);
+    else todo.push(t);
+  }
+  const free = mine.filter((r) => !keep.has(r.id));
+  const replace = todo.slice(0, free.length).map((t, i) => ({ id: free[i]!.id, isBid, tick: t.tick, lots: t.lots }));
+  const place = todo.slice(free.length).map((t) => ({ isBid, tick: t.tick, lots: t.lots }));
+  const cancel = free.slice(todo.length).map((r) => r.id);
+  return { replace, place, cancel };
+}
+
+/**
+ * Moves are sequenced so our own quotes never cross each other mid-requote: when the market falls the bids move
+ * (down) first, when it rises the asks move (up) first. Cancels go first (they only remove liquidity).
+ */
+export function planRequote(resting: readonly Resting[], target: { bids: readonly Level[]; asks: readonly Level[] }): Plan {
+  const b = side(resting, true, target.bids);
+  const a = side(resting, false, target.asks);
+  const oldBest = Math.max(0, ...resting.filter((r) => r.isBid).map((r) => r.tick));
+  const newBest = Math.max(0, ...target.bids.map((l) => l.tick));
+  const falling = newBest !== 0 && oldBest !== 0 ? newBest < oldBest : false;
+  return {
+    replace: falling ? [...b.replace, ...a.replace] : [...a.replace, ...b.replace],
+    place: falling ? [...b.place, ...a.place] : [...b.place, ...a.place],
+    cancel: [...b.cancel, ...a.cancel],
+  };
+}
+
+export interface RequoteInput {
+  /** |index − last quoted index| in whole bps (floor) */
+  movedBps: bigint;
+  restingCount: number;
+  /** size of the ladder we would build now (may be one-sided or shorter than 2·levels) */
+  targetCount: number;
+  /** every resting order still has its full size */
+  allFull: boolean;
+  /** |q − q at the last quote| */
+  dq: number;
+  /** index-move threshold in bps; default 2 (MATH_SPEC §4). Raised only to save gas on testnet (REQUOTE_BPS) */
+  requoteBps?: bigint;
+}
+
+/** Requote only on a > 2 bps index move (MATH_SPEC §4), a missing/partially filled level, or a ≥ 0.05 inventory move. */
+export function needsRequote(i: RequoteInput): boolean {
+  return i.movedBps > (i.requoteBps ?? 2n) || i.restingCount < i.targetCount || !i.allFull || i.dq >= 0.05;
+}
+
+// ───────────────────────────── RPC / gas discipline (Phase 4 step 1) ─────────────────────────────
+
+/** Quote every `every` blocks (1 = every block; 2–3 on testnet halve/third the reads). */
+export function shouldTick(block: bigint, lastTickBlock: bigint, every: bigint): boolean {
+  return lastTickBlock < 0n || every <= 1n || block - lastTickBlock >= every;
+}
+
+/** One of our OrderBook logs, as decoded by the log scan. */
+export type BookLog =
+  | { eventName: "Trade"; args: { makerOrderId: bigint } }
+  | { eventName: "OrderEvicted"; args: { orderId: bigint } }
+  | { eventName: "MakerFillSkipped"; args: { orderId: bigint } };
+
+/**
+ * The resting order a log of ours changed, or null (CR-007). Trade (partly/fully filled) and OrderEvicted (removed,
+ * reads 0 lots, so the planner re-quotes it) ⇒ that id needs a getOrder read. MakerFillSkipped ⇒ null: the market
+ * refused new risk (paused / oracle stale), the order is still live and unchanged, so no read and no re-quote.
+ */
+export function touchedId(l: BookLog): bigint | null {
+  switch (l.eventName) {
+    case "Trade":
+      return l.args.makerOrderId;
+    case "OrderEvicted":
+      return l.args.orderId;
+    case "MakerFillSkipped":
+      return null;
+  }
+}
+
+/**
+ * Which resting orders need a getOrder read: only ids a Trade / OrderEvicted log of ours mentioned since the last
+ * tick (a fill or an eviction is the only way a resting order changes without our own tx; a MakerFillSkipped
+ * leaves it unchanged), plus every order once every `fullEvery` ticks as a safety net (a missed log range, a
+ * failed read).
+ */
+export function idsToRefresh(resting: readonly Resting[], touched: ReadonlySet<bigint>, tickCount: number, fullEvery: number): bigint[] {
+  const full = fullEvery <= 1 || tickCount % fullEvery === 0;
+  return resting.filter((r) => full || touched.has(r.id)).map((r) => r.id);
+}
