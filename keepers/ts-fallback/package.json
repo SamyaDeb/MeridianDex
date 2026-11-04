@@ -1,0 +1,33 @@
+{
+  "name": "@meridian/keeper-ts",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "Meridian TS fallback keeper: funding pokes, perp liquidations, Pyth pushes (WS-03)",
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "check-source": "tsx scripts/check-source.ts",
+    "evidence": "tsx scripts/evidence.ts",
+    "watch": "tsx scripts/watch.ts",
+    "oracle-deviation": "tsx scripts/oracle-deviation.ts",
+    "flow-quote": "tsx scripts/flow-quote.ts",
+    "fork-pyth-relay": "tsx scripts/fork-pyth-relay.ts",
+    "page-receiver": "tsx scripts/page-receiver.ts",
+    "tx-cost": "tsx scripts/tx-cost.ts",
+    "perpl-swap": "tsx src/perpl-swap.ts"
+  },
+  "dependencies": {
+    "@meridian/abis": "workspace:*",
+    "@meridian/bot-rpc": "workspace:*",
+    "viem": "^2.57.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.2"
+  }
+}
