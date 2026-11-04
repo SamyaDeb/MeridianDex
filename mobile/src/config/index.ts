@@ -1,0 +1,35 @@
+// Runtime wiring of buildAppConfig: APP_ENV from the Expo config `extra` (set per EAS profile), RPC from EXPO_PUBLIC_*
+// (inlined by Metro at build time, so each must be read as a literal `process.env.EXPO_PUBLIC_…`).
+import Constants from "expo-constants";
+import meridian10143 from "../../../deployments/10143.json";
+import perplJson from "../../../deployments/perpl.json";
+import { buildAppConfig, type AppConfig } from "./appConfig";
+
+export * from "./appConfig";
+
+let cached: AppConfig | undefined;
+
+export function getAppConfig(): AppConfig {
+  cached ??= buildAppConfig({
+    appEnv: (Constants.expoConfig?.extra as { appEnv?: unknown } | undefined)?.appEnv,
+    rpcUrl: process.env.EXPO_PUBLIC_MONAD_RPC_URL,
+    wsUrl: process.env.EXPO_PUBLIC_MONAD_WS_URL,
+    indexerUrl: process.env.EXPO_PUBLIC_INDEXER_URL,
+    // deployments/143.json doesn't exist until mainnet day (N9): add `143: meridian143` then.
+    meridianDeployments: { 10143: meridian10143 },
+    perplJson,
+  });
+  return cached;
+}
+
+/** This build's version (app.config.ts `version`, via expo-constants); undefined when Constants has no config. */
+export function appVersion(): string | undefined {
+  return Constants.expoConfig?.version;
+}
+
+/** Settings → Version: app version (app.config.ts), build profile and chain. No git sha: not in the config today, and
+ *  adding one would need a build step (N8: don't). */
+export function buildInfo(): { version: string; env: string; chainId: number } {
+  const cfg = getAppConfig();
+  return { version: Constants.expoConfig?.version ?? "—", env: cfg.env, chainId: cfg.chainId };
+}
