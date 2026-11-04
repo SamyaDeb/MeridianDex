@@ -1,0 +1,205 @@
+# PHASES: the build, phase by phase (supersedes the day grid in TEAM_PLAN §4)
+
+> Paths under `docs/standup/` and `docs/prompts/` cited below are the team's working logs, kept in the private development repository.
+
+The team finished Phase 1 in one day, so the plan now runs on **phases with exit gates** instead of fixed days. A phase ends when its gate passes, not when the calendar says so. The dates are **latest** dates; finishing early pulls everything forward. The checkpoint dates stay as hard backstops: CP1 Sat 3 Oct, CP2 Wed 7 Oct, CP3 Sat 10 Oct, submit Tue 13 Oct 18:00.
+
+Rules for every phase:
+- A gate is **demoed live** (terminal or screen share) and recorded in `docs/standup/<A|B|C>.md`. No gate is passed on "should work".
+- Scope freeze at the end of Phase 4. Contract code freeze at 18:00 on mainnet day (Phase 5).
+- Merges go to `main` only through A's WS-00 session (Meridian checkout), after cross-review (A ⇄ B for contracts).
+
+| Phase | Name | Latest end | Status |
+|---|---|---|---|
+| 0 | Plan, interfaces, mocks | Tue 29 Sep | ✅ done |
+| 1 | Core modules in isolation | Tue 29 Sep | ✅ done (not merged) |
+| 2 | Integrate the perp core on anvil | Thu 1 Oct | ✅ G2 met except human items (live indexer/Docker, login decision) |
+| 3 | Testnet perp + yield layers built | Sun 4 Oct (CP1 Sat 3 Oct inside) | ✅ on testnet except the 1 h unattended run + B7 ≤ 3 (MON / paid RPC); see G3 |
+| **4** | **Full stack on testnet, scope freeze** | **Wed 7 Oct (CP2)** | **✅ scope frozen 30 Sep 2026**; G4 below (⚠️ items are MON / RPC / human bound) |
+| 5 | Mainnet readiness and launch | Sat 10 Oct (CP3) | ▶ ~50% (4 Oct): reviews A/B done, C's 4 frontend branches merged; 2 High open, B's 5 + A's 1 branches unmerged; see "Phase 5 plan update" |
+| 6 | Proof and submission | Tue 13 Oct 18:00 | — |
+
+---
+
+## Phase 0: Plan, interfaces, mocks ✅
+Specs, frozen interfaces (v1.1 → v1.2), mocks, CI, DeployLocal (mocks), ABI export, prompts.
+
+## Phase 1: Core modules in isolation ✅ (all on branches, none merged)
+| Lane | Delivered |
+|---|---|
+| A `ws-01-orderbook` | TickBitmap, place/cancel/replace, bounded matching + eviction, gas bench (place+cancel 63.7k), I6/I7 handler, 56 tests |
+| A `ws-02-clearinghouse` | FundingLib, MarkPriceLib, MarginLib, ClearingHouse (F, G, oracle ring, hooks, caps, fees, liquidation), InsuranceFund, MarketFactory, I1–I5/I11 handler, 135 tests; CR-006 filed |
+| B `ws-03-oracle-keepers-mm` | PythChainlinkOracleAdapter + unit/fuzz/fork tests; keeper started (uncommitted) |
+| C `ws-06/07/08` | Envio indexer (53 tests), PWA shell + mock data (27 tests), √τ chart, invariant skeletons I1–I11 on mocks |
+
+Decisions recorded at the end of Phase 1 (lead):
+1. Funding first-touch gas target is < 30k normally and **< 40k on checkpoint blocks** (1 in 200). The 2-slot checkpoint stays; 1-slot packing would overflow for BTC-priced markets.
+2. The mark is cached once per block at first touch: approved.
+3. markBand (5%) and lastTradeMaxAge (100 blocks) stay library constants.
+4. Voluntary reductions must leave equity ≥ 0: approved.
+5. Uncovered bad debt stays as negative collateral, and future deposits repay it first: approved.
+6. Reservation release saturates at 0: approved (I7 tolerance ≤ 1 wei per fill).
+7. **MATH_SPEC I1 gets a −Σpending term**: `AUSD.balanceOf(CH)·1e12 ≥ ΣC − ΣON − Σpending + accruedFees`.
+8. MockOrderBook must call maker fills before the single taker fill and evict on `false`.
+9. **MATH_SPEC §6.2:** swap `net` uses one floor division `floor((q·ΔF·YEAR − K·ΔG)/(1e18·YEAR))`; `kDelta = Δq·A/1e18` is computed once per fill and applied as +kDelta / −kDelta to the two sides (ΣK = 0 exactly).
+10. Testnet (verified 29 Sep): Pyth MON/USD at `0x2880aB155794e7179c9eE2e38200202908C17B43` exists but is ~75 min stale (no sponsored push), so **the keeper must push Hermes updates and the Pyth API key is a CP1 blocker**. No Chainlink feeds listed on testnet, so the guard runs with secondary = address(0). No AUSD on testnet: deploy a 6-dp MockERC20 `tAUSD`. Testnet WMON `0xFb8bf4c1CC7a94c73D209a149eA2AbEa852BC541`.
+11. *(Phase 3, lead)* **MATH_SPEC §5.2 skew rule amended**: the literal form is degenerate under Σq = 0 (it caps the vault at 0.8 × its own short); capacity = skewCapacity · takers' net long = skewCapacity·max(0, −(vaultSize + Σ registered-provider sizes)). The MM bot addresses are registered as skew providers at deploy. Also: at the launch caps (maxPositionSize 25k MON ≈ $725) the vault can deploy ≈ $1.2k of its 10k AUSD deposit cap; Phase 4/5 must choose between a higher perp position cap, a vault-specific cap, or a lower vault deposit cap (open).
+12. *(Phase 5, owner, 30 Sep)* **Vault cap: option C.** Mainnet `vault.depositCap` = **1,200 AUSD** (`"1200000000"`, 6 dp) in `contracts/script/config/143.json`; config only, no code. It supersedes the 10,000 AUSD launch cap in TEAM_PLAN §7 / MATH_SPEC §5.3 for launch. Raise it (Safe, `setVaultParams`) together with the perp `maxPositionSize` after launch.
+13. *(Phase 5, owner, 30 Sep)* **CR-007 deferred** to post-hackathon; the runbook mitigation (MM re-quotes after `OrderEvicted` / stale→fresh) stays. No interface change: interfaces stay `v1.5` unless a security finding rated High reopens it before the 10 Oct 18:00 freeze.
+14. *(Phase 5, lead, 4 Oct)* **Agora bounty dropped.** The reported requirement (BOUNTY_MAP "Agora requirement", third-party source) needs Mera login and trades executed through Perpl; a Perpl path would be built only for the bounty. Reopen only if a founder confirms the official text says otherwise.
+15. *(Phase 5, lead, 4 Oct; OPEN for the owner)* **Login: Privy recommended.** With Agora dropped, Mera is no longer forced. Owner decides by Mon 5 Oct; without a decision the app ships the injected wallet and claims neither login bounty.
+16. *(Phase 5, lead, 4 Oct)* **Positioning.** At least one public Track 01 entry (FluxState) has a per-block-funding perp on testnet. Write-up, video and pitch lead with the onchain CLOB + funding oracle + yield layers + mainnet (BOUNTY_MAP "Field check").
+17. *(Phase 5, lead session, 5 Oct; decided)* **A-01 (vault withdraw/forced-exit route): the mainnet vault launches IDLE; CR-010 is not applied.** Effort estimate for CR-010: 1 to 1.5 days (vault + hedger code, unit/regression/fuzz tests, a keeper Flow-route exit, app copy, a frozen-interface change that needs an owner-approved WS-00 apply), against a code freeze at Thu 8 Oct 18:00 and a 2 h idle path, so the WIN_PLAN rule (> 1 day ⇒ idle) applies. How: `vault.skewCapacity = 0` in `config/143.json` makes the hedge target 0 whatever the keeper does (no keeper call, `rebalance`, `rebalanceWithRoute` or `enterHedge`, can hedge), so every redemption is served from idle AUSD, up to the 1,200 AUSD cap, and a deposit that cannot be redeemed cannot exist. Proved by `test/unit/MeridianVaultIdleLaunch.t.sol` + `test/fuzz/MeridianVaultIdleLaunch.fuzz.t.sol` with the route-only hedger of the A-01 finding. The app shows "Waiting for route" by itself: it reads `vaultParams().skewCapacity == 0` from the chain (`a926c65`; the `NEXT_PUBLIC_VAULT_ROUTE_PENDING=1` flag still forces it). PRD §3 states it. Cost: no vault yield on mainnet at launch (the vault is demonstrated on testnet). Reopen: after launch, apply CR-010 (or verify a live direct MON/AUSD market on a fork), then the Safe raises `skewCapacity` to 0.8e18 via `setVaultParams`. The two A-01 tests stay in `test/review/ReviewA.t.sol` behind `REVIEW_A01_OPEN=true` (owner chose the gate, 5 Oct) and are the acceptance tests for CR-010.
+18. *(Phase 5, lead session, 5 Oct)* **B-01 (swap `markApr` atomic manipulation) fixed with a per-block bound, not a TWAP.** The first touch of a block fixes the mark for the whole block; across blocks it follows the live mark by at most 0.5 APR points per elapsed block (cap 20 blocks, so one refresh moves it ≤ 10 points ≈ 0.8% of notional at τ = 30 d, under the ≈ 2.6% IM–MM gap); a trade printed in the current block is not a mark input. O(1), one storage slot, no loop. Why not a TWAP: it needs a ring buffer and a write per fill; why not last-block only: the order book calls the engine after matching, so no snapshot is pre-manipulation. Consequence for ops: a genuine regime change reaches the swap mark at ≈ 10 points per touched refresh, so the keeper pokes the market (`settle` of any account) while the mark is behind (CR-011). MATH_SPEC §6.3 updated. The keeper poke is implemented (`be3a5e0`, `SWAP_MARK_POKE_EVERY_BLOCKS`, default 20).
+19. *(Phase 5, lead session, 5 Oct)* **B-02 (swap reduction grows |K|) fixed before launch** (`bbe16b5`): it was cheap (one branch of `_check`) and the exposure was the insurance fund. Rule (MATH_SPEC §6.4): a voluntary reduction needs equity ≥ 0 and `slack_after ≥ min(0, slack_before)` with slack = equity − MM (the `isLiquidatable` measure, MM ↑). A close near the mark, and any reduction that improves an existing shortfall, still passes (tested), so no user is trapped; a close more than ≈ 64 APR points off the mark that would create a shortfall is refused (`InsufficientMargin`; a maker fill is skipped and the order evicted).
+20. *(integration session, 5 Oct; owner-delegated decisions, SINGLE_SESSION §2)* **D1: the frontend-loop app is the app.** Phase 2 app work (T1, T2, T8) is ported onto it, not merged (it was built on the old app).
+21. *(integration session, 5 Oct; owner-delegated decisions, SINGLE_SESSION §2)* **D2: T3 desktop layout dropped.** Superseded by the responsive shell (F0.4) and terminal grid (F2); `ws-07k-desktop` stays unmerged.
+22. *(integration session, 5 Oct; owner-delegated decisions, SINGLE_SESSION §2)* **D3: one `/rates` page.** The frontend loop's F5.6 page stays; only T8's MFI client, MFI vs Meridian vs Perpl chart and per-venue status are ported (`83520e2`).
+23. *(integration session, 5 Oct; owner-delegated decisions, SINGLE_SESSION §2)* **D4: user-facing rename to Meridian on the new app** (metadata, manifest, terms, README, ONBOARDING) + text-only OG image; internal names stay Meridian.
+24. *(integration session, 5 Oct; owner-delegated decisions, SINGLE_SESSION §2)* **D5: `TERMS_VERSION` bumped once for the rename** (`2026-10-05-meridian-draft`): existing acceptors re-accept.
+25. *(integration session, 5 Oct; owner-delegated decisions, SINGLE_SESSION §2)* **D6: Privy behind `NEXT_PUBLIC_PRIVY_APP_ID`** (unset = injected/dev path); pinned `@privy-io/react-auth@3.47.0`, `@privy-io/wagmi@4.0.18`; the SDK loads only with an app ID.
+26. *(integration session, 5 Oct; owner-delegated decisions, SINGLE_SESSION §2)* **D7: MFI history = option A.** The MFI service persists append-only JSONL (7 days), no Envio entity.
+27. *(integration session, 5 Oct; owner-delegated decisions, SINGLE_SESSION §2)* **D8: CR numbering.** Trigger orders keep CR-012; the `mfi/` path CR is CR-013, Approved + applied, lane D row in TEAM_PLAN.
+28. *(integration session, 5 Oct; owner-delegated decisions, SINGLE_SESSION §2)* **D9: CR-012 trigger orders deferred past the 8 Oct freeze.** Mainnet ships without a TriggerOrderManager; no trigger mock in production (refused on 143). Shipping later needs a v2 OrderBook (`placeReduceOnlyMarketFor` is not in the deployed one).
+29. *(integration session, 5 Oct; owner-delegated decisions, SINGLE_SESSION §2)* **D10: TradingView Advanced Charts cut for the hackathon** (licence timing); Lightweight Charts ships.
+30. *(integration session, 5 Oct; owner-delegated decisions, SINGLE_SESSION §2)* **D11: F5.7 gate done** (Lighthouse ≥ 80 / a11y ≥ 95 every route, 44 px targets, 3-width screenshots).
+31. *(integration session, 5 Oct; owner-delegated decisions, SINGLE_SESSION §2)* **D12: benchmarks.** B3 cut (needs a bench-only mapping-layout OrderBook). B1/B2 rerun + reduced B4 approved on testnet within 2 testnet MON *only* with a non-public RPC: the endpoint turned out to be a free tier ⇒ BLOCKED #5; 0.639 testnet MON spent on an aborted B1/B2 rerun (PHASE3_LOOP P6).
+32. *(integration session, 5 Oct; owner-delegated decisions, SINGLE_SESSION §2)* **D13: swap MM on 143 runs `REQUOTE_BPS=1000 TICK_EVERY_BLOCKS=33 LEVELS=1`** (`keepers/143.swap-mm.env.example`); mm-bot refuses lower `REQUOTE_BPS` on 143 without `ALLOW_HIGH_BURN=1`.
+33. *(integration session, 5 Oct; owner-delegated decisions, SINGLE_SESSION §2)* **D14: Slither `uninitialized-local` ×7 re-read: all benign**, no contract change (PHASE3_LOOP security status).
+34. *(integration session, 5 Oct; owner-delegated decisions, SINGLE_SESSION §2)* **D15: MFI hosting on Railway** via Infrastructure as Code (`mfi/.railway/railway.ts`) + `docs/outputs/MFI_HOSTING.md`; deploy waits on the owner's Railway login.
+35. *(hardening lead session, 6 Oct; decided by the lead session on the owner's instruction, owner may override; docs/HARDENING_PLAN.md)* **~~No v1 vault on mainnet day.~~ Superseded by decision 40 (no mainnet deploy before the submission).** The Thu 8 Oct deploy ships perp + swaps only. The idle v1 vault would earn 0 and need a migration; vault v2 (decision 39) deploys on its own on Sat 10 Oct (HARDENING_PLAN P6). The Earn page shows "Vault opens Sat 10 Oct" until then. Supersedes the idle-launch half of decision 17 for mainnet day. Owner may override (deploy v1 idle Thu, migrate Sat).
+36. *(hardening lead session, 6 Oct; decided by the lead session on the owner's instruction, owner may override; docs/HARDENING_PLAN.md)* **Bad-debt waterfall: insurance fund → accrued protocol fees → uncovered** (audit M-3, HARDENING_PLAN P1). `_coverBadDebt` in ClearingHouse and FundingSwapMarket absorbs what the IF can't cover from `_fees` (`fromFees = min(uncovered, max(_fees, 0))`) before any of it becomes negative collateral / `totalBadDebt`, so `collectFees` can never pay the protocol ahead of users. No interface change; `BadDebtSocialized.coveredByInsurance` stays the IF part, the fee part = `requested − coveredByInsurance − uncovered`. Rejected: a "revert `collectFees` while `totalBadDebt > 0`" guard (`totalBadDebt` never decreases, so it would lock fees forever without moving money to users). MATH_SPEC §3.3 / §6.4.
+37. *(hardening lead session, 6 Oct; decided by the lead session on the owner's instruction, owner may override; docs/HARDENING_PLAN.md)* **Mark premium bound** (audit M-1, HARDENING_PLAN P2, **implemented 6 Oct** on `ws-02d-mark-bound`): the book-derived basis `p = M/I − 1` moves ≤ `MARK_MAX_PREMIUM_STEP` (10 bps) per elapsed block, k ≤ `MARK_MAX_ELAPSED_BLOCKS` (20); index moves pass through instantly. Bound the basis, not the price (an absolute bound would lag a real crash). `MarkPriceLib.boundPremium` after the unchanged median-of-three, in `ClearingHouse._preview`; no storage, interface or `MeridianConstants` change (MATH_SPEC §2.1 amendment). Gas option A (no stored premium): CH-own first touch 29,368 → 29,452, 29,867 when the bound binds (new asserted bench row), both < 30,000.
+38. *(hardening lead session, 6 Oct; decided by the lead session on the owner's instruction, owner may override; docs/HARDENING_PLAN.md)* **CR-007 applied; decision 13 reversed** (audit M-2, HARDENING_PLAN P3; applied 6 Oct as `interfaces-v1.6`, branch `ws-01c-cr007-skip`). `settleMakerFill` returns `MakerFillResult { Filled, Evict, Skip }`. **Skip** (perp: paused or oracle stale; swap: paused) leaves the maker order exactly as it rests (lots, FIFO, level, reservation), emits `MakerFillSkipped`, and stops matching (no jumping the queue); fills made before it settle, a crossing remainder never rests. **Evict** (perp: margin, position cap; swap: margin, caps, `Matured`, which is permanent) is the old eviction. The perp checks pause/staleness before margin, so an under-margined maker on a paused/stale market is Skipped (kept on purpose). Consequence: while stale or paused a reducing taker fills only against reducing makers up to the first increasing one; liquidations are unaffected. The runbook "re-quote after stale→fresh" mitigation is now only needed for real evictions.
+39. *(hardening lead session, 6 Oct; decided by the lead session on the owner's instruction, owner may override; docs/HARDENING_PLAN.md)* **Vault v2: async withdrawals** (audit A-01/A-07/A-09/A-11, HARDENING_PLAN P5, CR-014): sync `withdraw`/`redeem` idle-only; beyond idle an ERC-7540-style request → keeper `fulfillRedeems` with a route → `claimRedeem` queue; `exitHedgeWithRoute` + Safe `emergencyUnwind` kept from CR-010; CR-010's `redeemWithRoute` / `withdrawWithRoute` are **superseded**. Lane note: the vault is WS-04 (B); if the lead session implements P5, this decision records the exception. Cut rule: not green by Sat 10 Oct 12:00 ⇒ no vault on mainnet.
+    **Final (7 Oct 2026, hardening lead session): implemented, green before the Fri 9 Oct 18:00 cut-off.** Lead implements the vault (WS-04, B's lane), **owner instruction 7 Oct**. CR-014 applied as `interfaces-v1.7` (`fe58160`) with type-level refinements recorded in its row (payout `uint128 assets` + enum status in `RedeemRequest`; `previewFulfill` view for the keeper's quote, A-13); swap `BadDebtSocialized` parity deferred, post-hackathon (would force a swap redeploy on 10143). Semantics = HARDENING_PLAN P5.2 / MATH_SPEC §5.6, nothing beyond: sync path idle-only (A-11), the in-tx empty-route unwind deleted (A-01 root cause, A-07), request → keeper fulfil with a route → claim, `totalAssets = NAV − claimableAssets` (I8), fulfil refuses when perp equity ≤ 0 (A-07), 10-block cooldown on forced keeper paths (A-09), owner `emergencyUnwind`. **A-01 fork proof** on a 143 fork with real Kuru Flow routes: `test/fork/VaultV2Fork.t.sol` (`0ce5692`). Deploy: `script/DeployVaultV2.s.sol` (hedge off at deploy: skewCapacity 0, depositCap 1,200; hedger `kuruMarket = 0` on 143). PHASES 17's idle launch stays the deploy state; the owner enables the hedge with `setVaultParams` (testnet P6). Mainnet still after the hackathon (40).
+40. *(owner, 6 Oct 2026; recorded by the hardening lead session, HARDENING_PLAN revision "6 Oct, night")* **No mainnet deploy before the hackathon submission.** Testnet 10143 is the demo deployment; mainnet readiness = the mainnet-fork rehearsal (HARDENING_PLAN P4.4) + the A-01 fork test (P5.3f). Supersedes decision 35. Mainnet after the hackathon.
+41. *(owner, 6 Oct 2026; applied by the hardening lead session)* **Pulse → Meridian everywhere** (repo, contracts, interfaces, packages, docs; CR-015). Names only: selectors and event topics unchanged. Applied before the P4.5 testnet relaunch, so the new deployment is built from `DeployMeridian.s.sol`.
+42. *(hardening lead session for the owner, Wed 7 Oct 2026 02:00 IST, HARDENING_PLAN P6.6; owner may override)* **Demo freeze: deployment `deployments/10143.json` @ the commit tagged `demo-freeze-10143` (local tag), 7 Oct 2026 02:00 IST; no contract deploys or changes until submission.** Perp, swaps and demo market from P4 (`DeployMeridian` `3611352`, startBlock 68,739,694); vault v2 + labelled MockKuruHedger from P6.1 (`DeployVaultV2` built from `b38c6ba`, vaultStartBlock 68,775,102). Declared before the Sat 10 Oct 18:00 deadline. Still open and **not contract work**: swap-MM key + MON (owner), hosted Envio redeploy (owner), Earn v2 UI (C). P7 adds only docs, benchmarks, users and the video.
+43. *(K4 session, Thu 8 Oct 2026; **approved by the owner 8 Oct**)* **CRE receiver deployed on 10143 under the demo freeze: standalone, no change to existing contracts.** `MeridianKeeperReceiver` (`contracts/src/automation/`, implements the frozen `IMeridianKeeperReceiver`) and `MeridianMfiFeed` (`contracts/src/oracle/`, CR-016, written only by the receiver) are new contracts added to the record by `DeployKeeperReceiver.s.sol`; the ClearingHouses, OrderBooks, swaps, oracle, IF and vault keep their bytecode and parameters. Owner-key txs it needs: `depositFor(receiver, 200 tAUSD)` in the main and demo CH (margin for backstop liquidations) and `vault.setKeeper(receiver, true)` (one more keeper; the TS keeper stays). Forwarder = the Monad Testnet **simulation** `MockKeystoneForwarder` (`cre workflow simulate --broadcast`); switching to the production `KeystoneForwarder` when DON deployment (Early Access) is granted is one owner tx, `setForwarder`. The TS keeper remains the primary keeper; CRE is the backstop.
+44. *(K7 session, Thu 8 Oct 2026; **approved by the owner 8 Oct** ("go proceed" after the K7 §1 feasibility report))* **ETH-PERP added on 10143 under the demo freeze: a new standalone OrderBook + ClearingHouse + keeper-fed `TestnetKeeperOracle` (ETH/USD, Pyth feed `0xff61491a…0ace` from Hermes, pushed by the keeper), registered in the existing MarketFactory and authorized on the existing InsuranceFund; no change to deployed contracts' code or parameters.** Same bytecode as MON-PERP-DEMO (sizes checked: CH 26,902 B, OB 14,653 B, oracle 3,923 B). Params (config `markets.eth`, MATH_SPEC §1.3 / §3.3 / §3.4 / §4): tick 0.10 USD (0.39 bp of ETH, the same relative tick as MON-PERP's 1e-6 at 0.0256), lot 0.001 ETH (≈ 2.57 USD, MON-PERP's lot in dollars), caps 0.25 / 2.5 ETH (MON-PERP's caps in dollars), risk and funding identical (per-second / dimensionless), oracle staleness 60 s. `contracts.MarketFactory`'s owner and the IF owner are the deployer, so no new owner txs. Deployed by `contracts/script/AddMarket.s.sol` (block 69,227,046, 1.353 MON); recorded under a new `markets` key in `deployments/10143.json`, `contracts.*` and `demoMarket` unchanged. Vault, funding swaps, MFI and trigger orders stay MON-PERP only. Purpose: two independent markets sharing the IF and factory (Track 01 "perp venue"), and B4.
+
+---
+
+## Phase 2: Integrate the perp core on anvil (▶ next; latest end Thu 1 Oct)
+**Goal:** one `main` that contains every Phase 1 module, and the full perp loop running end to end on a local chain (contracts, keeper, market maker, indexer, app), before touching testnet.
+
+| Session | Worktree | Phase 2 job |
+|---|---|---|
+| A0 | `Meridian` (`ws-00-foundations`) | CR-006 → v1.3, mock fixes, spec amendments 7 + 9, merges in order, DeployLocal on real contracts, `SmokeLocal` script |
+| A1 | `pulse-a` | CP1 integration test on real contracts, reference-model fuzz, real-engine gas |
+| A2 | `pulse-a3` (new, `ws-05-swaps`) | Funding swaps core, tests first (started early) |
+| B | `pulse-b` | Commit keeper, review A's contracts, testnet oracle path, keeper + MM against anvil, vault on mocks |
+| C1 | `pulse-c` (`ws-08-qa`) | Invariants on the real contracts |
+| C2 | `pulse-c2` (`ws-06-indexer`) | Indexer end to end on anvil |
+| C3 | `pulse-c3` (`ws-07-frontend`) | Login decision + Trade/Positions wired to anvil |
+
+**Merge order (A0):** ws-00 fixes (tag v1.3) → ws-03 (A reviews) → ws-01 (B reviews) → ws-02 (B reviews; delete the local `InvalidParams` declarations, now in the interface) → ws-06 → ws-07 → ws-08. After each merge: `forge fmt --check && forge test && python3 tools/gen_interfaces_md.py --check`. Conflicts in `docs/standup/A.md` (append-only) keep both sides. Conflicts in `abis/` are resolved by re-running `bash tools/export_abis.sh`.
+
+**Gate G2 ("CP1 on anvil"), all demoed live:**
+- [x] `main` has OB + CH + IF + MarketFactory + oracle adapter; `interfaces-v1.3`; fmt, tests and the INTERFACES check are green *(30 Sep: 271 contract tests)*
+- [x] `Integration.t.sol` passes *(9/9)*: deposit → limit → cross → positions → 12,000 blocks of per-block funding → `averageFundingApr` = ΔF·1e18/ΔG·YEAR from events → −15% oracle move liquidates a 5x long → IF and keeper paid → Σq = 0, longOI = shortOI, I1 (with −Σpending) holds
+- [x] `anvil` + `DeployLocal` (real contracts) + `SmokeLocal`: the keeper pokes funding (≤ 20-block gaps) and liquidates within ≤ 3 blocks; the MM keeps a two-sided book *(max gap 20; 3 liquidations at 1 block; MM 5.86 bps)*
+- [~] The indexer ingests every event type from the smoke run; realized APR 1h/8h/24h equals the contract's `averageFundingApr` *(recorded-log replay: all perp event types, 1 h APR equal to the wei; live Envio run, 8 h/24 h and lag pending Docker)*
+- [~] The app shows the live per-block funding ticker, a position with pending funding and liq price, from anvil, with the chosen login *(done with injected + anvil dev login; Privy-vs-Mera not decided)*
+- [x] Invariants I1–I7 and I11 green on the real OB + CH (256×128) *(and 512×256, fail_on_revert)*
+- [ ] Human: shared git remote exists; Pyth API key in hand; Privy-vs-Mera decided; bounty criteria pasted; Envio token; Docker *(all open on 30 Sep)*
+
+In parallel (tracked, not gating): swaps core (A2) tests-first on mocks; vault started on mocks (B).
+
+---
+
+## Phase 3: Testnet perp + yield layers built (latest end Sun 4 Oct; CP1 on Sat 3 Oct)
+**Goal:** the perp runs on Monad testnet with real oracle pushes, a keeper and an MM. Swaps and vault are complete as contracts.
+- A0: `DeployMeridian` for 10143 (tAUSD, Pyth pushed by keeper, no Chainlink), `deployments/10143.json`, deploy the perp market.
+- A1: hardening from invariant and indexer findings; review B's vault/hedger PRs.
+- A2: FundingSwapMarket complete (liquidation, maturity, I9 handler) + integration on the real CH; merge.
+- B: keeper + MM live on testnet; vault + KuruHedger on real CH/OB (mainnet-fork tests for Kuru and Kuru Flow); merge.
+- C: indexer on hosted testnet; app Earn + Fix screens on mocks → testnet; benchmark harness B1/B2 on testnet; user outreach starts.
+**Gate G3 = CP1 (testnet):** real trades on testnet with per-block funding, a live liquidation, keeper + MM running unattended 1 h, the indexer and app showing it; swaps and vault merged with green unit + integration tests.
+
+**G3 status (30 Sep, lead, single session; evidence in docs/standup/A.md, B.md, C.md):**
+| Item | Status | Evidence |
+|---|---|---|
+| Real trades on **Monad testnet**, per-block funding (≤ 20-block gaps) | ❌ blocked (no `DEPLOYER_PK`/`KEEPER_PK`/`MM_PK`, no testnet MON) · ⚠️ rehearsed | `DeployMeridian` fork dry-run at testnet block 66,793,749 OK (29.7 M gas perp+demo; 48.1 M with vault+swaps); testnet code limit measured 128 KB; broadcast rehearsal on a local chain id 10143: after the keeper fix **max FundingUpdated gap 19 blocks, 0 > 20** (1,243 blocks) |
+| **Live liquidation** (demo market), keeper latency | ❌ on testnet · ⚠️ rehearsed | MON-PERP-DEMO crash (factor 0.85): liquidated **1 block after eligibility, 3 blocks / 3.95 s after the oracle push** (1 s anvil blocks) |
+| Keeper + MM **unattended ≥ 1 h** | ❌ on testnet · ⚠️ rehearsed | 3 h 29 min, 4 bots, 0 errors, books two-sided 208/210 & 209/210 samples ≤ 11.1 bps; bug found + fixed (56-block gap from a stalled price read) and re-verified 20 min |
+| Indexer and app show the testnet market | ❌ pending deployment · ⚠️ ready | `testMarket` label (indexer + app badge), recorder with 100-block chunks verified on the 10143-shaped chain (4,653 events); live Envio needs Docker + token |
+| **Swaps and vault merged**, green unit + integration (+ I9, I8/I10) | ✅ | contracts **380/380**: swaps 26 unit + fuzz + 4 integration on the real CH + 2nd OB + I9 (256×128 and 512×256, 35 liquidations/771 runs); vault 20 unit + 11 hedger + fork (live Kuru: 10 USDC → 370.49 MON) + fuzz + I8 (1,224 unwind withdrawals); tags `interfaces-v1.4`, `interfaces-v1.5` |
+| Gas targets | ✅ Foundry · ⏳ testnet | place+cancel 96,478 (< 100k), CH-own first touch 29,273 (< 30k), checkpoint 29,984 (< 40k); MIP-8 receipts need the testnet run (`bench/gas_onchain.ts`) |
+| Human: remote, Pyth key, login decision, bounty criteria, Envio token, Docker, testnet MON, paid RPC | ❌ all open | — |
+Lead decisions this phase: 11 (skew rule amended, above); CR-007 proposed (maker-fill Skip vs Evict), CR-008/CR-009 applied.
+
+**G3 close-out (Phase 4, 30 Sep; docs/standup/A.md "Phase 4"):**
+| Item | Status | Evidence |
+|---|---|---|
+| Real trades + per-block funding on testnet, gaps ≤ 20 | ✅ | lag 6 keeper: 66 gaps over 1,201 blocks (66,932,691–66,933,892), max 20, 0 > 20 (chunked logs) |
+| Live liquidation on testnet | ✅ | demo market, tx `0xac7d67c8…f23f` (block 66,933,023), IF credited |
+| B7 ≤ 3 blocks | ❌ | 8 blocks after eligibility on the free public RPC (send path ≈ 3.2 s); 1 block locally. Needs the keeper on a paid RPC |
+| Keeper + MM unattended ≥ 1 h on testnet | ❌ | not affordable: keeper ≈ 9.2 MON/h at lag 6, MM ≈ 24 MON/h; wallets held 6.39 MON. Rehearsed locally (3 h 29 min, Phase 3; 20 min A/B, Phase 4) |
+| Indexer + app show testnet | ⚠️ | app reads testnet on all tabs (read-only dry-run screenshots); indexer live run pending Docker, replay tests green |
+
+## Phase 4: Full stack on testnet, scope freeze (latest end Wed 7 Oct = CP2)
+- Swap market + vault deployed on testnet; MM quotes the swap book; keeper does swap liquidations and `settleMaturity` (1-hour test maturity).
+- CRE only if deploy access was granted (else dropped, recorded).
+- Invariants I1–I11 green on real contracts; benchmark runs B1–B4 and B7 on testnet; app complete (all 5 tabs).
+- Demo dry-run end to end.
+**Gate G4 = CP2 + scope freeze:** everything in the demo script works on testnet; after this, fixes/UX/ops only.
+
+**G4 status (30 Sep, lead, single session; evidence in docs/standup/A.md "Phase 4"):**
+| Item | Status | Evidence |
+|---|---|---|
+| Vault: deposit → keeper rebalance → hedged within θ | ✅ testnet (forced entry) · ✅ local (entry rule) | testnet: keeper `enterHedge()` tx `0x59a0ed8c…6040` ⇒ spot 400 = short 400 MON, netDelta 0. The 8 h entry rule on testnet would need ≈ 72 MON of pokes, so it ran locally: realized 8 h APR 43.86% ⇒ EnterHedge ⇒ hedged 20,000/20,000 |
+| Skew cap enforced | ✅ testnet + local | testnet `rebalance()` (SkewCap) tx `0x551e7306…363a`: 400 → 100 ≤ capacity 160; local 20,000 → 16,000 = 0.8 × 20,000 |
+| NAV rises with funding | ✅ testnet + local | testnet share price +5.0e10 wei over 82 blocks; local up every block |
+| Swaps: long/short fill on the swap book | ✅ testnet | MM two-sided 10.92/10.98%; long at 10.98% tx `0x977de75c…8355`, short at 10.92% tx `0x8ccb451d…a498` |
+| Accrual = MATH_SPEC §6.2 within 1 wei | ✅ testnet + local | diff 0 wei on both sides (testnet block 66,932,382/390; local block 146) |
+| Maturity snapshot on the 1-hour test maturity; keeper `settleMaturity` | ✅ testnet | keeper tx `0x839985ea…31f9` 1 s after maturity; accrual frozen; `Matured` on increases |
+| Swap liquidation | ⚠️ local only | a 1-hour maturity can't be liquidated by a price shock (MM horizon = min(liqHorizon, τ)); rehearsed on a 30-day market (1 block) |
+| Invariants I1–I11 on real contracts (256×128 and 512×256), `forge test` 100% | ✅ | `forge test` 379/379 (twice after the flaky-check fix); `FOUNDRY_PROFILE=ci` invariant suites 29/29 at 512×256 |
+| Keeper + MM (perp + swap) running; G3 closed | ⚠️ | all bots ran on testnet in budgeted windows; 1 h unattended + B7 ≤ 3 open (MON, paid RPC) |
+| App: all 5 tabs live on testnet, Earn + Fix write paths, login per decision | ⚠️ | 5 tabs read testnet (dry-run screenshots `app/e2e/screenshots/demo-*.png`); Earn/Fix writes pass Playwright on the local full stack; **login undecided** ⇒ injected + dev |
+| Indexer live (or replay + pending note) | ⚠️ replay | full-stack replay 8/8 vs contract views; live Envio pending Docker; hosted needs the git remote |
+| B1–B4 + B7 in `docs/outputs/BENCHMARKS.md` | ⚠️ | B1/B2 testnet + Foundry, B6, B7 in; B3/B4 placeholders (no paid RPC / MON) |
+| Demo dry-run | ✅ with gaps | read-only testnet walk-through 4/4 + crash on a local fork (liquidated at offset 1, NAV flat, markApr flat). Gaps: login segment (decision), metrics dashboard (indexer), a fresh 30-day swap market for the video, mainnet |
+
+Decisions this phase: CRE **dropped** (no deploy access; PRD §8 cut order). CR-007 stays **Proposed** (unapplied). **Vault cap (decision 11): open, the owner picks one** (numbers at MON = 0.0272, L = 1.5, launch caps maxPositionSize 25k / OI 250k MON):
+- **A. Raise the perp `maxPositionSize` for everyone** (e.g. to the 250k OI cap): the vault's reach becomes 0.8 × takers' net long, at most 200k MON ≈ $5.4k notional ⇒ ≈ $9.1k deployed (spot + margin). Config only, but one trader could then hold the whole OI.
+- **B. Vault-specific position cap** (a per-account cap override in the CH): same reach for the vault only. Needs an IClearingHouse CR (interfaces-v1.6) and CH code, which conflicts with this scope freeze.
+- **C. Lower the vault `depositCap` to ≈ 1,200 AUSD at launch** (`setVaultParams`, no code): at the 25k cap the vault can deploy ≈ $1.13k (25k MON spot ≈ $680 + margin ≈ $453) of 10k today. Raise it together with the perp caps later. **Lead's recommendation: C for launch** (honest, no code after the freeze).
+
+**Scope frozen: Wed 30 Sep 2026** (lead). From here: fixes, UX, ops only.
+
+## Phase 5: Mainnet readiness and launch (latest end Sat 10 Oct = CP3)
+- Security review of all contracts (cross-review + WS-08 checklist), fixes.
+- Mainnet-fork rehearsal of `DeployMeridian` (owner = Safe 2-of-3) + crash demo on the fork (per-block CSV).
+- Monitoring + `keepers/RUNBOOK.md`; mobile polish (Lighthouse ≥ 80, iOS/Android checklist).
+- **Mainnet day:** deploy with caps, seed IF + MM inventory + vault, keeper/MM live, indexer on mainnet, first external users. Contract code freeze 18:00.
+**Gate G5 = CP3:** live on mainnet, ≥ 5 external users, first fees onchain.
+
+### Phase 5 plan update (Sun 4 Oct, lead)
+> **Superseded for task order by `docs/WIN_PLAN.md`** (mainnet moved up to Thu 8 Oct, MFI + Perpl, desktop, Privy). The table below stays as the merge/fix record.
+
+**Merged to main 4 Oct (squash, after `tsc`, app vitest 75/75, indexer 78/78, `next build`, testnet dry-run Playwright 4/4):** `ws-07f-tos-geo` (8b48fd9), `ws-07h-onboarding` (3831866), `ws-07g-mainnet-polish` (f4de43b), `ws-06e-live` (3ec2eb5).
+
+**Decisions 4 Oct:** 14 (Agora dropped), 15 (login: Privy recommended, owner by Mon 5 Oct), 16 (positioning); see the decisions list above and BOUNTY_MAP.
+
+**Remaining work, in order (owner, latest date):**
+| # | Task | Owner | By |
+|---|---|---|---|
+| 1 | Merge B's branches: `ws-04b-sec-fixes`, `ws-03i-review-b`, `ws-03j-oracle-params`, `ws-03i-kuru-flow`, `ws-03k-paging` (rebase on main first); A's `ws-00h-review-a` scratch tests | A (B rebases) | Mon 5 Oct |
+| 2 | Fix the two Highs: **A-01** vault route (decide CR-010 or launch the vault idle with `NEXT_PUBLIC_VAULT_ROUTE_PENDING`), **B-01** swap `markApr` atomic manipulation | A + B | Tue 6 Oct |
+| 3 | Login per decision 15 (Privy wiring, or confirm injected) | C | Tue 6 Oct |
+| 4 | Rename the app's public name **Pulse → Meridian** (header, manifest, title, terms) | C | Tue 6 Oct |
+| 5 | **Desktop layout** (≥ 1024 px: book + order form side by side, top nav; phone layout unchanged). Judges will likely open it on a laptop; UX only, allowed after the freeze. Owner to confirm | C | Wed 7 Oct |
+| 6 | Mainnet-fork rehearsal of `DeployMeridian` (owner = Safe 2-of-3) + crash demo on the fork (per-block CSV) | A | Wed 7 Oct |
+| 7 | HUMAN: Safe address, paid RPC, MON for mainnet keys, Docker (live Envio), ToS sign-off ×3 + jurisdiction list, Track 01 rubric + Mera/Privy/Envio/Kuru blocks pasted into BOUNTY_MAP | founders | Tue 6 Oct |
+| 8 | Mainnet day: deploy with caps (vault `depositCap` 1,200 AUSD), seed IF + MM + vault, keeper/MM live, indexer on 143, outreach to ≥ 5 external users (USERS.md) | all | Thu 8 – Sat 10 Oct |
+
+## Phase 6: Proof and submission (Tue 13 Oct 18:00)
+- Benchmarks final (`docs/outputs/BENCHMARKS.md`), metrics dashboard, √τ chart.
+- Crash demo recording (mainnet fork, labelled), demo video per DEMO_SCRIPT, `docs/outputs/WRITEUP.md` using only PRD §7.1 claims, project profile, bounty forms.
+- Write-up and video follow the positioning in BOUNTY_MAP "Field check": open with the full funding-rate layer (CLOB → oracle → vault → swaps) and mainnet evidence. Bounty forms only for bounties still claimed: Track 01, Envio, the login bounty per decision 15, Kuru only if confirmed (Agora and CRE dropped).
+**Gate G6:** submitted before 18:00, with every hard acceptance criterion linked to evidence.
+
+Prompts for the current phase live in `docs/prompts/phase-N/`.
